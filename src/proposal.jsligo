@@ -1,0 +1,54 @@
+#import "./errors.jsligo" "Errors"
+#import "./vote.jsligo" "Vote"
+#import "./timelock.jsligo" "Timelock"
+
+export type t =
+    // @layout:comb
+    {
+        descriptionLink: string,
+        hash: option<bytes>,
+        startAt: timestamp,
+        endAt: timestamp,
+        votes: Vote.votes,
+        creator: address,
+        timelock: option<Timelock.t>
+    }
+
+export type makeParams =
+    // @layout:comb
+    {
+        descriptionLink: string,
+        hash: option<bytes>
+    }
+
+const make = (p: makeParams, startDelay: nat, votingPeriod: nat) : t => {
+    const startAt = Tezos.get_now() + int(startDelay);
+
+    return {
+        descriptionLink: p.descriptionLink,
+        hash: p.hash,
+        startAt: startAt,
+        endAt: startAt + int(votingPeriod),
+        votes: Map.empty as Vote.votes,
+        creator: Tezos.get_sender(),
+        timelock: (None() as option<Timelock.t>)
+    };
+};
+
+const isVotingPeriod = (p: t) : bool =>
+    ((Tezos.get_now() >= p.startAt) && (Tezos.get_now() < p.endAt));
+
+const _checkNotVotingPeriod = (p: t) : unit =>
+    assert_with_error(!isVotingPeriod(p), Errors.votingPeriod);
+
+const _checkIsVotingPeriod = (p: t) : unit =>
+    assert_with_error(isVotingPeriod(p), Errors.notVotingPeriod);
+
+const _checkNoVoteOngoing = (p_opt: option<t>) : unit =>
+    match(p_opt, {
+        Some: (p: t) => _checkNotVotingPeriod(p),
+        None: () => unit
+    });
+
+const _checkVotingPeriodEnded = (p: t) : unit =>
+    assert_with_error(Tezos.get_now() > p.endAt, Errors.votingPeriod);

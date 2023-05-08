@@ -1,0 +1,25 @@
+export type choice = bool;
+export type t = [choice, nat];
+export type votes = map<address, t>;
+
+//    [count (votes)] is the count of [votes].
+//    Returns a triple of:
+//        - total votes (for + against),
+//        - sum of votes for,
+//        - sum of votes against.
+const count = (votes : votes) : [nat, nat, nat] => {
+    const sum = ([acc, vote]: [[nat,nat], [address, t]]): [nat, nat] => {
+        const [for_, against] = acc;
+        const [_, [choice, nb]] = vote;
+
+        if (choice) {
+            return [for_ + nb, against];
+        }
+
+        return [for_, against + nb];
+    };
+
+    const [for_, against] = Map.fold(sum, votes, [0 as nat, 0 as nat]);
+
+    return [for_ + against, for_, against];
+};

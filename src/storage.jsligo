@@ -1,0 +1,62 @@
+#import "./config.jsligo" "Config"
+#import "./lambda.jsligo" "Lambda"
+#import "./metadata.jsligo" "Metadata"
+#import "./outcome.jsligo" "Outcome"
+#import "./proposal.jsligo" "Proposal"
+#import "./timelock.jsligo" "Timelock"
+#import "./token.jsligo" "Token"
+#import "./vault.jsligo" "Vault"
+#import "./vote.jsligo" "Vote"
+
+export type outcomes = big_map<nat, Outcome.t>
+
+export type t =
+    // @layout:comb
+    {
+        metadata: Metadata.t,
+        governanceToken: Token.t,
+        config: Config.t,
+        vault: Vault.t,
+        proposal: option<Proposal.t>,
+        outcomes: outcomes,
+        nextOutcomeId: nat
+    }
+
+const createProposal = (p: Proposal.t, s: t) : t =>
+    ({ ...s, proposal: Some(p) })
+
+const updateConfig = (f: Lambda.parameterChange, s: t) : t =>
+    ({ ...s, config: f() })
+
+const updateVault = (v: Vault.t, s: t) : t =>
+    ({ ...s, vault: v })
+
+const updateVotes = (p: Proposal.t, v: Vote.t, s: t) : t => {
+    const newVotes = Map.update(Tezos.get_sender(), Some(v), p.votes);
+    const newProposal = { ...p, votes: newVotes };
+    return { ...s, proposal: Some(newProposal) }
+}
+
+const updateOutcome = (k: nat, o: Outcome.t, s: t) : t =>
+    ({ ...s, outcomes: Big_map.update(k, Some(o), s.outcomes) })
+
+const addOutcome = (o: Outcome.t, s: t) : t => {
+    let [proposal, status] = o;
+
+    // If proposal is accepted, also create timelock
+    if ((Accepted() as Outcome.state) == status) {
+        const unlockAt = Tezos.get_now() + int(s.config.timelockDelay);
+        proposal = ({ ...proposal, timelock: Some(Timelock.make(
+            unlockAt,
+            s.config.timelockPeriod))})
+    }
+
+    return { ...s,
+        proposal: None() as option<Proposal.t>,
+        outcomes: Big_map.update(
+            s.nextOutcomeId,
+            Some([proposal, status]),
+            s.outcomes),
+        nextOutcomeId: s.nextOutcomeId + (1 as nat)
+    }
+};

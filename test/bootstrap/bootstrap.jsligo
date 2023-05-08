@@ -1,0 +1,35 @@
+#import "@ligo/fa/test/helpers/list.mligo" "List_helper"
+#import "../helpers/token.jsligo" "Token_helper"
+#import "../helpers/dao.jsligo" "DAO_helper"
+#import "../../src/main.jsligo" "DAO"
+
+// Boostrapping of the test environment,
+// initTokAmount is the amount of token allocated to every
+// bootstrapped accounts
+const boot = (initTokAmount: nat, initStorage : DAO.storage)
+: [Token_helper.originated, DAO_helper.originated, address] => {
+    // Originate the token contract and the contract under test
+    const tok = Token_helper.originate(initTokAmount);
+    // Override governance token with test token
+    const initDAOStorage = { ...initStorage, governanceToken: tok.addr };
+    const dao = DAO_helper.originate(initDAOStorage);
+
+    // Add the dao as operator for all the FA2 owner addresses
+    //    TODO: ... in the real world, remove operator?
+    List.iter((owner: address) => {
+        Test.set_source(owner);
+        return Token_helper.add_operators(list([
+                { owner: owner, operator: dao.addr, token_id: (0 as nat) }
+            ]), tok.contr);
+        }, tok.owners);
+
+    // Set a token owner as sender in the Test framework
+    const sender_ = List_helper.nth_exn(1)(tok.owners);
+    Test.set_source(sender_);
+
+    // Set the baker to 5th account
+    const baker = Test.nth_bootstrap_account(5);
+    Test.set_baker(baker);
+
+    return [tok, dao, sender_];
+};

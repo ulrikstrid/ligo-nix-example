@@ -1,0 +1,83 @@
+#import "@ligo/fa/test/helpers/list.mligo" "List_helper"
+#import "./helpers/token.jsligo" "Token_helper"
+#import "./helpers/dao.jsligo" "DAO_helper"
+#import "./helpers/suite.jsligo" "Suite_helper"
+#import "./helpers/log.jsligo" "Log"
+#import "./helpers/assert.jsligo" "Assert"
+#import "./bootstrap/bootstrap.jsligo" "Bootstrap"
+#import "../src/main.jsligo" "DAO"
+
+const _ = Log.describe("[End_vote] test suite");
+
+// Boostrapping of the test environment
+const initTokAmount = 33 as nat;
+const bootstrap = () : [
+    Token_helper.originated,
+    DAO_helper.originated,
+    address] => {
+    const baseConfig = DAO_helper.baseConfig;
+    const baseStorage = DAO_helper.baseStorage;
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat};
+    const daoStorage = { ...baseStorage, config: config };
+    return Bootstrap.boot(initTokAmount, daoStorage);
+};
+
+// Successful end_vote with proposal accepted
+const testSuccessPropAccepted = (() : unit => {
+    const [tok, dao, _] = bootstrap();
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+    const daoStorage = Test.get_storage (dao.taddr);
+    assert (daoStorage.proposal == (None() as option<DAO.Proposal.t>));
+    DAO_helper.assertProposalState(daoStorage.outcomes, 1 as nat, Accepted());
+})();
+
+// Successful end_vote with proposal rejected because quorum was not reached
+const testSuccessPropRejectedQuorumNotReached = (() : unit => {
+    const [tok, dao, _] = bootstrap();
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 5 as nat, true], [1, 5 as nat, true], [2, 5 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const daoStorage = Test.get_storage (dao.taddr);
+    DAO_helper.assertProposalState(
+        daoStorage.outcomes, 1 as nat,
+        Rejected_(WithoutRefund())
+    );
+})();
+
+// Successful end_vote with proposal rejected because super_majority was not reached
+const testSuccessPropRejectedSuperMajNotReached = (() : unit => {
+    const [tok, dao, _] = bootstrap();
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 15 as nat, true], [1, 15 as nat, true], [2, 15 as nat, false]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+    const daoStorage = Test.get_storage (dao.taddr);
+    DAO_helper.assertProposalState(
+        daoStorage.outcomes, 1 as nat,
+        Rejected_(WithRefund())
+    );
+})();
+
+// Failing end_vote because proposal voting period ongoing
+const testFailureVotingPeriod = (() : unit => {
+    const [_, dao, _] = bootstrap();
+
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const r = DAO_helper.endVote(dao.contr);
+    Assert.stringFailure(r, DAO.Errors.votingPeriod);
+})();
+
+// TODO: test for total_supply_not_found error

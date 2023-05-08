@@ -1,0 +1,122 @@
+#import "@ligo/fa/test/helpers/list.mligo" "List_helper"
+#import "./helpers/dao.jsligo" "DAO_helper"
+#import "./helpers/token.jsligo" "Token_helper"
+#import "./helpers/suite.jsligo" "Suite_helper"
+#import "./helpers/log.jsligo" "Log"
+#import "./helpers/assert.jsligo" "Assert"
+#import "./bootstrap/bootstrap.jsligo" "Bootstrap"
+#import "../src/main.jsligo" "DAO"
+
+const _ = Log.describe("[Cancel] test suite");
+
+// Boostrapping of the test environment
+const initTokAmount = 33 as nat;
+const bootstrap = (initDAOStorage : DAO.storage) : [
+    Token_helper.originated,
+    DAO_helper.originated,
+    address] => Bootstrap.boot(initTokAmount, initDAOStorage);
+const empty_nat_option = None() as option<nat>
+const baseConfig = DAO_helper.baseConfig;
+const baseStorage = DAO_helper.baseStorage;
+
+// Successful cancel of current proposal
+const testSuccessCurrentProposal = (() : unit => {
+    // Add suffiscient start_delay
+    const config = { ...baseConfig, startDelay: 86400 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, sender_] = bootstrap(daoStorage);
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+    DAO_helper.cancelSuccess(empty_nat_option, dao.contr);
+    const daoStorageContr = Test.get_storage (dao.taddr);
+    DAO_helper.assertProposalState(daoStorageContr.outcomes, 1 as nat, Canceled());
+    Token_helper.assertBalanceAmount(
+        tok.taddr,
+        sender_,
+        abs(initTokAmount - daoStorage.config.depositAmount)
+    );
+})();
+
+// Succesful cancel of accepted proposal, before timelock is unlocked
+const testSuccessAcceptedProposal = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat,
+        votingPeriod: 360 as nat,
+        timelockDelay: 3000 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+    DAO_helper.cancelSuccess(Some(1 as nat), dao.contr);
+    const daoStorageContr = Test.get_storage (dao.taddr);
+    DAO_helper.assertProposalState(daoStorageContr.outcomes, 1 as nat, Canceled());
+})();
+
+// Failing cancel because there is nothing to cancel
+const testFailureNothingToCancel = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const r = DAO_helper.cancel(empty_nat_option, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.nothingToCancel);
+})();
+
+// Failing cancel because the outcome was not found
+const testFailureOutcomeNotFound = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const r = DAO_helper.cancel(Some(23 as nat), dao.contr);
+    Assert.stringFailure(r, DAO.Errors.outcomeNotFound);
+})();
+
+// Failing cancel proposal because not creator
+const testFailureNotCreator = (() : unit => {
+    const config = { ...baseConfig, startDelay: 1200 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const sender_ = List_helper.nth_exn (2)(tok.owners);
+    Test.set_source (sender_);
+    const r = DAO_helper.cancel(empty_nat_option, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.notCreator);
+})();
+
+// Failing cancel proposal because timelock is unlocked
+const testFailureTimelockUnlocked = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat  };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const r = DAO_helper.cancel(Some(1 as nat), dao.contr);
+    Assert.stringFailure(r, DAO.Errors.timelockUnlocked);
+})();
+
+// Failing cancel proposal because it was already executed
+const testFailureAlreadyExecuted = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat  };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+    DAO_helper.executeSuccess(1 as nat, DAO_helper.dummyPacked, dao.contr);
+
+    const r = DAO_helper.cancel(Some(1 as nat), dao.contr);
+    Assert.stringFailure(r, DAO.Errors.alreadyExecuted);
+})();

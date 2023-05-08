@@ -1,0 +1,191 @@
+#import "@ligo/fa/test/helpers/list.mligo" "List_helper"
+#import "./helpers/token.jsligo" "Token_helper"
+#import "./helpers/dao.jsligo" "DAO_helper"
+#import "./helpers/suite.jsligo" "Suite_helper"
+#import "./helpers/log.jsligo" "Log"
+#import "./helpers/assert.jsligo" "Assert"
+#import "./bootstrap/bootstrap.jsligo" "Bootstrap"
+#import "../src/main.jsligo" "DAO"
+
+import Lambda = DAO.Lambda;
+
+const _ = Log.describe("[Execute] test suite");
+
+// Boostrapping of the test environment
+const initTokAmount = 33 as nat;
+const bootstrap = (initDAOStorage : DAO.storage) : [
+    Token_helper.originated,
+    DAO_helper.originated,
+    address] => Bootstrap.boot(initTokAmount, initDAOStorage);
+const baseConfig = DAO_helper.baseConfig;
+const baseStorage = DAO_helper.baseStorage;
+
+// Successful timelock execution of an operation list
+const testSuccess = ((): unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat  };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(
+        tok,
+        dao,
+        Some(DAO_helper.dummyHash),
+        votes
+    );
+
+    DAO_helper.executeSuccess(1 as nat, DAO_helper.dummyPacked, dao.contr);
+    DAO_helper.assertExecuted(dao.taddr, 1 as nat);
+})();
+
+// Successful execution of a parameter change
+const testSuccessParameterChanged = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat  };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const baseConfig = DAO_helper.baseConfig;
+    const packed = Bytes.pack (ParameterChange(
+        () => ({ ...baseConfig, quorumThreshold: 51 as nat })
+    ) as Lambda.t);
+    const hash_ = Some(Crypto.sha256 (packed));
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    DAO_helper.executeSuccess(1 as nat, packed, dao.contr);
+    DAO_helper.assertExecuted(dao.taddr, 1 as nat);
+    const daoStorageContr = Test.get_storage (dao.taddr);
+
+    // Assert that the config has been updated
+    assert(daoStorageContr.config.quorumThreshold == (51 as nat));
+})();
+
+// Successful execution of an operation list
+const testSuccessOperationList = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat  };
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const owner2 = List_helper.nth_exn (2)(tok.owners);
+    const owner2InitialBalance = Token_helper.get_balance_for(
+        tok.taddr,
+        owner2
+    );
+
+    // Pack an operation that will send 2 tokens from DAO to owner2
+    const owner2AmountToReceive = 2 as nat;
+    const opList = Token_helper.createTransferCallable(
+        tok.addr, dao.addr, owner2, owner2AmountToReceive
+    );
+    const packed = Bytes.pack(OperationList(opList) as Lambda.t);
+
+    const owner2AmountLocked = 25 as nat;
+    const hash_ = Some(Crypto.sha256 (packed));
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    DAO_helper.executeSuccess(1 as nat, packed, dao.contr);
+    DAO_helper.assertExecuted(dao.taddr, 1 as nat);
+
+    const owner2_expected_balance : nat = abs(
+        owner2InitialBalance
+        - owner2AmountLocked
+        + owner2AmountToReceive);
+
+    Token_helper.assertBalanceAmount(
+        tok.taddr,
+        owner2,
+        owner2_expected_balance
+    );
+})();
+
+// Failing because no outcome
+const testFailureNoOutcome = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const r = DAO_helper.execute(1 as nat, DAO_helper.dummyPacked, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.outcomeNotFound);
+})();
+
+// Failing because timelock delay not elapsed
+const testFailureTimelockDelayNotElapsed = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat,
+        timelockDelay: 1800 as nat};
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const r = DAO_helper.execute(1 as nat, DAO_helper.dummyPacked, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.timelockLocked);
+})();
+
+// Failing because timelock has been relocked
+const testFailureTimelockRelocked = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat,
+        timelockDelay: 10 as nat, timelockPeriod: 160 as nat};
+
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(DAO_helper.dummyHash);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const r = DAO_helper.execute(1 as nat, DAO_helper.dummyPacked, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.timelockLocked);
+})();
+
+// Failing because the packed data is not matching expected type
+const testFailureUnpackMismatch = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat };
+
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const packed = Bytes.pack("");
+    const hash_ = Some(Crypto.sha256(packed));
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const r = DAO_helper.execute(1 as nat, packed, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.unpackMismatch);
+})();
+
+// Failing because the hash doesn't match the packed bytes
+const testFailureHashNotMatch = (() : unit => {
+    const config = { ...baseConfig,
+        startDelay: 10 as nat, votingPeriod: 360 as nat };
+
+    const daoStorage = { ...baseStorage, config: config };
+    const [tok, dao, _] = bootstrap(daoStorage);
+
+    const hash_ = Some(0x01);
+    const votes = list([
+        [0, 25 as nat, true], [1, 25 as nat, true], [2, 25 as nat, true]
+    ]);
+    Suite_helper.createAndVoteProposal(tok, dao, hash_, votes);
+
+    const r = DAO_helper.execute(1 as nat, DAO_helper.dummyPacked, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.hashNotMatch);
+})();

@@ -1,0 +1,107 @@
+#import "@ligo/fa/lib/fa2/asset/single_asset.mligo" "SingleAsset"
+#import "@ligo/fa/test/fa2/single_asset.test.mligo" "SingleAsset_helper"
+#import "./assert.jsligo" "Assert"
+#import "../../src/main.jsligo" "DAO"
+
+// Some types for readability
+type taddr = typed_address<SingleAsset.parameter, SingleAsset.storage>;
+type contr = contract<SingleAsset.parameter>;
+export type originated = {
+    addr: address,
+    taddr: taddr,
+    owners: list<address>,
+    ops: list<address>,
+    contr: contr
+};
+
+const originate = (tok_amount : nat) : originated => {
+    const f = "../bootstrap/single_asset.mligo";
+    const [init_storage, owners, ops] = SingleAsset_helper.get_initial_storage(
+        [tok_amount, tok_amount, tok_amount]
+    );
+    const v_mich = Test.run(((x:SingleAsset.Storage.t) => x), init_storage);
+    const [addr, _, _] = Test.originate_from_file(f, "main", list(["total_supply"]), v_mich, 0 as tez);
+    const taddr : taddr = Test.cast_address (addr);
+    const contr = Test.to_contract (taddr);
+    return {
+        addr: addr,
+        taddr: taddr,
+        owners: owners,
+        ops: ops,
+        contr: contr
+    };
+};
+
+type single_asset_transfer_param = {
+    contr: contr,
+    source: address,
+    from_: address,
+    to: address,
+    amount: nat
+};
+
+// Transfer token in [contr] between [from_] and [to_] addresses with [amount_] tokens,
+//  WARNING: changes Test framework source
+const transfer = (contr: contr, from_: address, to_: address, amount_: nat)
+: nat => {
+    Test.set_source (from_);
+    const transfer_requests : SingleAsset.transfer = list([
+      {from_: from_, txs: list([{to_:to_, amount: amount_, token_id: 0 as nat}])}
+    ]);
+    return Test.transfer_to_contract_exn (contr, (Transfer(transfer_requests)), 0 as tez);
+};
+
+// Batch add [operators] to [contr] contract
+const add_operators = (operators: list<SingleAsset.operator>, contr: contract<SingleAsset.parameter>) : unit => {
+    const f = ([ys, x] : [list<SingleAsset.unit_update>, SingleAsset.operator])
+    : list<SingleAsset.unit_update> => list([(Add_operator(x) as SingleAsset.unit_update), ...ys]);
+    const add_operator = List.fold_left (f, (list([]) as list<SingleAsset.unit_update>), operators);
+    let r = Test.transfer_to_contract(contr, (Update_operators(add_operator)), 0 as tez);
+    Assert.txSuccess(r);
+};
+
+// assert for FA2 insuffiscient balance string failure
+const assertInsBalanceFailure = (r : test_exec_result) : unit =>
+    Assert.stringFailure(r, SingleAsset.Errors.ins_balance);
+
+// assert FA2 contract at [taddr] have [owner] address with [amount_] tokens in its ledger
+const assertBalanceAmount = (taddr: taddr, owner: SingleAsset.Ledger.owner, amount_: nat) : unit => {
+    const s = Test.get_storage (taddr);
+    return match (Big_map.find_opt(owner, s.ledger), {
+        Some: (tokens: nat) => assert(tokens == amount_),
+        None: () => Test.failwith("Big_map key should not be missing")
+    });
+};
+
+// get balance in [taddr] contract for [owner] address
+const get_balance_for = (taddr: taddr, owner: SingleAsset.Ledger.owner) :
+nat => {
+    const s = Test.get_storage (taddr);
+    return match (Big_map.find_opt(owner, s.ledger), {
+        Some: (amount_: nat) => amount_,
+        None: () => 0 as nat
+    });
+};
+
+// Create a lambda of type (list<operation>) that would call the "transfer"
+// entrypoint of a FA2 contract residing at [addr], making a token transfer between
+// [from_] and [to_] addresses with [amount_] tokens.
+const createTransferCallable = (addr: address, from_: address, to_: address, amount_: nat)
+: DAO.Lambda.operationList => {
+    return () : list<operation> => {
+        const transferOpt: option<contract<SingleAsset.transfer>> =
+            Tezos.get_entrypoint_opt("%transfer", addr);
+
+        return match (transferOpt, {
+            Some: (c: contract<SingleAsset.transfer>) => {
+                const transfer_requests: SingleAsset.transfer = list([
+                  {from_: from_, txs: list([{to_: to_, amount: amount_, token_id: 0 as nat}]) as
+                  list<SingleAsset.atomic_trans> }
+                ]);
+                const op = Tezos.transaction(transfer_requests, 0 as tez, c);
+                return list([op]);
+            },
+            None: () => failwith("TOKEN_CONTRACT_NOT_FOUND")
+        });
+    }
+};

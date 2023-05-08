@@ -1,0 +1,2 @@
+// tzip-16 https://tzip.tezosagora.org/proposal/tzip-16/
+export type t = big_map<string, bytes>;

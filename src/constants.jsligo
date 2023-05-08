@@ -1,0 +1,1 @@
+const noOperation : list<operation> = list([])

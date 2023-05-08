@@ -1,0 +1,63 @@
+#import "./helpers/token.jsligo" "Token_helper"
+#import "./helpers/dao.jsligo" "DAO_helper"
+#import "./helpers/log.jsligo" "Log"
+#import "./helpers/assert.jsligo" "Assert"
+#import "./bootstrap/bootstrap.jsligo" "Bootstrap"
+#import "../src/main.jsligo" "DAO"
+
+const _ = Log.describe("[Release] test suite");
+
+// Boostrapping of the test environment
+const initTokAmount = 10 as nat;
+const bootstrap = (initDAOStorage : DAO.storage) : [
+    Token_helper.originated,
+    DAO_helper.originated,
+    address] => Bootstrap.boot(initTokAmount, initDAOStorage);
+const baseConfig = DAO_helper.baseConfig;
+const baseStorage = DAO_helper.baseStorage;
+
+// Successful release
+const testSuccess = (() : unit => {
+    const [tok, dao, sender_] = bootstrap(baseStorage);
+
+    DAO_helper.lockSuccess(3 as nat, dao.contr);
+    DAO_helper.releaseSuccess(3 as nat, dao.contr);
+
+    DAO_helper.assertLocked(dao.taddr, sender_, 0 as nat);
+    Token_helper.assertBalanceAmount(
+        tok.taddr,
+        sender_,
+        initTokAmount
+    );
+})();
+
+// Failing release because no locked tokens
+const testFailureNoLockedTokens = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const r = DAO_helper.release(3 as nat, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.noLockedTokens);
+})();
+
+// Failing release because insuffiscient balance
+const testFailureInsBalance = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+    DAO_helper.lockSuccess(2 as nat, dao.contr);
+    const r = DAO_helper.release(3 as nat, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.notEnoughBalance);
+})();
+
+// Failing release because voting is underway
+const testFailureVotingPeriod = (() : unit => {
+    // Really short start_delay
+    const config = { ...baseConfig, startDelay: 10 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [_, dao, _] = bootstrap(daoStorage);
+
+    DAO_helper.lockSuccess(3 as nat, dao.contr);
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const r = DAO_helper.release(3 as nat, dao.contr);
+
+    Assert.stringFailure(r, DAO.Errors.votingPeriod);
+})();

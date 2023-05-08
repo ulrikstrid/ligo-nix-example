@@ -1,0 +1,45 @@
+#import "./token.jsligo" "Token_helper"
+#import "./dao.jsligo" "DAO_helper"
+#import "@ligo/fa/test/helpers/list.mligo" "List_helper"
+
+// Creates a proposal on [dao] with [tok] as governance_token,
+// using given [hash_] for the proposal lambda.
+// The proposal creator is the first token owner registered in
+// the given [tok] token contract owners list.
+// Every token owner locks [amount_] of tokens in the DAO,
+// and votes "yes" to the created proposal,
+// eventually, the end_vote entry point is called.
+// Can lead to either accepted or rejected proposal, according to
+// the given [amount_] of tokens.
+// Requires appropriate config of various periods and delays
+const createAndVoteProposal = (
+    tok: Token_helper.originated, 
+    dao: DAO_helper.originated, 
+    hash_: option<bytes>, 
+    votes: list<[int, nat, bool]>
+) : unit => {
+    // set up the sender for propose and end_vote entry points
+    const sender_ = List_helper.nth_exn(1)(tok.owners);
+
+    // impersonate token owners and call lock entry point
+    const callLock = ([nthAccount, amount_, _] : [int, nat, bool]) : unit => {
+        Test.set_source (List_helper.nth_exn(nthAccount)(tok.owners));
+        DAO_helper.lockSuccess(amount_, dao.contr);
+    };
+    List.iter (callLock, votes);
+
+    // create proposal
+    Test.set_source (sender_);
+    const proposal = { ...DAO_helper.dummyProposal, hash: hash_ };
+    DAO_helper.proposeSuccess(proposal, dao.contr);
+
+    // impersonate token owners and call vote entry point
+    const callVote = ([nthAccount, _, choice] : [int, nat, bool]) : unit => {
+        Test.set_source (List_helper.nth_exn(nthAccount)(tok.owners));
+        DAO_helper.voteSuccess(choice, dao.contr);
+    };
+    List.iter (callVote, votes);
+
+    Test.set_source (sender_);
+    DAO_helper.endVoteSuccess(dao.contr);
+}

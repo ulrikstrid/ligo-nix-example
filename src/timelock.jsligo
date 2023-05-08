@@ -1,0 +1,31 @@
+#import "./errors.jsligo" "Errors"
+
+export type t =
+    // @layout:comb
+    {
+        unlock_at: timestamp,
+        // ^ timestamp for the unlock to happen
+
+        relock_at: timestamp
+        // ^ timestamp for the relock to happen
+    };
+
+const make = (unlock_at: timestamp, timelock_period: nat) : t => ({
+   unlock_at: unlock_at,
+   relock_at: unlock_at + int(timelock_period as nat)
+});
+
+const isLocked = (t : t) : bool =>
+    ((Tezos.get_now() < t.unlock_at) || (Tezos.get_now() >= t.relock_at));
+
+const _checkUnlocked = (t_opt : option<t>) : unit =>
+    match(t_opt, {
+        None: () => failwith(Errors.timelockNotFound),
+        Some: (t: t) => assert_with_error(!isLocked(t), Errors.timelockLocked)
+    });
+
+const _checkLocked = (t_opt: option<t>) : unit =>
+    match(t_opt, {
+        None: () => failwith(Errors.timelockNotFound),
+        Some: (t: t) => assert_with_error(isLocked(t), Errors.timelockUnlocked)
+    });

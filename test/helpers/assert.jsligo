@@ -1,0 +1,20 @@
+// Assert contract call results in failwith with given string
+const stringFailure = (res: test_exec_result,expected: string) : unit => {
+  let expected_bis = Test.eval (expected) ;
+  match (res, {
+    Fail: (x: test_exec_error) => (
+      match (x, {
+        Rejected: (x:[michelson_program,address]) => assert (Test.michelson_equal (x[0], expected_bis)),
+        Balance_too_low: (_: { contract_too_low : address , contract_balance : tez , spend_request : tez }) => Test.failwith ("contract failed for an unknown reason"),
+        Other: (_:string) => Test.failwith ("contract failed for an unknown reason")
+      })),
+    Success: (_:nat) => Test.failwith ("bad price check")
+  } );
+} ;
+
+// Assert contract result is successful
+const txSuccess = (res: test_exec_result) : unit =>
+  match (res, {
+    Fail: (_: test_exec_error) => Test.failwith("Transaction should not fail"),
+    Success: (_:nat) => unit
+  } );

@@ -1,0 +1,68 @@
+#import "./proposal.jsligo" "Proposal"
+#import "./vote.jsligo" "Vote"
+#import "./errors.jsligo" "Errors"
+
+export type rejectedStateExtra =
+    | ["WithRefund"]
+    | ["WithoutRefund"];
+
+export type state =
+    | ["Accepted"]
+    | ["Rejected_", rejectedStateExtra]
+    | ["Executed"]
+    | ["Canceled"];
+
+export type t = [Proposal.t, state];
+
+export type executeParams =
+    // @layout:comb
+    {
+        outcomeKey: nat,
+        packed: bytes
+        // ^ the packed Lambda.t
+    }
+
+const makeState = (
+    [total, for_, against]: [nat, nat, nat],
+    totalSupply: nat,
+    refundThreshold: nat,
+    quorumThreshold: nat,
+    superMajority: nat
+): state => {
+    if ((total / totalSupply * (100 as nat)) < refundThreshold) {
+        return Rejected_(WithoutRefund());
+    } else if ((for_ / total * (100 as nat)) < superMajority
+        || ((total / totalSupply * (100 as nat)) < quorumThreshold)) {
+        return Rejected_(WithRefund())
+    } else if (for_ > against) {
+        return Accepted()
+    } else {
+        return Rejected_(WithRefund())
+    }
+}
+
+const make = (p: Proposal.t,
+    totalSupply: nat,
+    refundThreshold: nat,
+    quorumThreshold: nat,
+    superMajority: nat
+) : t => [
+    p,
+    makeState(
+        Vote.count(p.votes),
+        totalSupply,
+        refundThreshold,
+        quorumThreshold,
+        superMajority
+    )
+];
+
+const getExecutableProposal = (outcome: t) : Proposal.t => {
+    const [p, state] = outcome;
+
+    if ((Accepted() as state) == state) {
+        return p;
+    }
+
+    return failwith(Errors.notExecutable);
+};

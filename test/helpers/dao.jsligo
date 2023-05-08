@@ -1,0 +1,170 @@
+#import "../../src/main.jsligo" "DAO"
+#import "./assert.jsligo" "Assert"
+
+import Lambda = DAO.Lambda;
+import Outcome = DAO.Outcome;
+
+// Some types for readability
+type taddr = typed_address<DAO.parameter, DAO.storage>;
+type contr = contract<DAO.parameter>;
+export type originated = {
+    addr: address,
+    taddr: taddr,
+    contr: contr,
+};
+
+// Some dummy values intended to be used as placeholders
+const dummyPacked = Bytes.pack (OperationList((() => list([]) as list<operation>)) as Lambda.t);
+const dummyHash = Crypto.sha256 (dummyPacked);
+
+const dummyProposal : DAO.Proposal.makeParams = {
+    descriptionLink: "ipfs://QmbKq7QriWWU74NSq35sDSgUf24bYWTgpBq3Lea7A3d7jU",
+    hash: Some(dummyHash)
+};
+const dummyGovernanceToken = "KT1VqarPDicMFn1ejmQqqshUkUXTCTXwmkCN" as address;
+
+// Some default values
+const emptyVault: DAO.Storage.Vault.t = Big_map.empty;
+const emptyOutcomes: DAO.Storage.outcomes = Big_map.empty;
+
+const baseConfig : DAO.Storage.Config.t = {
+    depositAmount: 4 as nat,
+    refundThreshold: 32 as nat,
+    quorumThreshold: 67 as nat,
+    superMajority: 80 as nat,
+    startDelay: 360 as nat,
+    votingPeriod: 1440 as nat,
+    timelockDelay: 180 as nat,
+    timelockPeriod: 720 as nat,
+    burnAddress: "tz1burnburnburnburnburnburnburjAYjjX" as address
+};
+
+const baseStorage : DAO.storage = {
+    metadata: Big_map.literal (list([
+        ["", Bytes.pack("tezos-storage:contents")],
+        ["contents", "" as bytes]
+    ])),
+    governanceToken: dummyGovernanceToken,
+    vault: emptyVault,
+    proposal: None() as option<DAO.Proposal.t>,
+    config: baseConfig,
+    nextOutcomeId: 1 as nat,
+    outcomes: emptyOutcomes
+};
+
+// Originate a DAO contract with given init_storage storage
+const originate = (init_storage: DAO.storage) : originated => {
+    const [taddr, _, _] = Test.originate (DAO.main, init_storage, 0 as tez);
+    const contr = Test.to_contract (taddr);
+    const addr = Tezos.address (contr);
+    return { addr: addr, taddr: taddr, contr: contr };
+};
+
+// Call entry point of DAO contr contract
+const call = (p: DAO.parameter, contr: contr): test_exec_result =>
+    Test.transfer_to_contract (contr, p, 0 as tez);
+
+// Entry points call helpers
+const cancel = (outcome_key_opt: option<nat>, contr: contr): test_exec_result =>
+    call(Cancel(outcome_key_opt), contr);
+
+const endVote = (contr: contr): test_exec_result => call(EndVote(), contr);
+
+const execute = (k: nat, packed: bytes, contr: contr): test_exec_result =>
+    call(Execute({ outcomeKey: k, packed: packed }), contr);
+
+const lock = (amount_: nat, contr: contr): test_exec_result => call(Lock(amount_), contr);
+
+const propose = (proposal: DAO.Proposal.makeParams, contr: contr): test_exec_result =>
+    call(Propose(proposal), contr);
+
+const release = (amount_: nat, contr: contr): test_exec_result =>
+    call(Release(amount_), contr);
+
+const vote = (choice: bool, contr: contr): test_exec_result => call(Vote(choice), contr);
+
+// Asserter helper for successful entry point calls
+const cancelSuccess = (outcome_key_opt: option<nat>, contr: contr): unit =>
+    Assert.txSuccess(cancel(outcome_key_opt, contr));
+
+const endVoteSuccess = (contr : contr): unit =>
+    Assert.txSuccess(endVote(contr));
+
+const executeSuccess = (k: nat, packed: bytes, contr: contr): unit =>
+    Assert.txSuccess(execute(k, packed, contr));
+
+const lockSuccess = (amount_: nat, contr: contr): unit =>
+    Assert.txSuccess (lock(amount_, contr));
+
+const proposeSuccess = (proposal: DAO.Proposal.makeParams, contr: contr): unit =>
+    Assert.txSuccess(propose(proposal, contr));
+
+const releaseSuccess = (amount_: nat, contr: contr): unit =>
+    Assert.txSuccess(release(amount_, contr));
+
+const voteSuccess = (choice: DAO.Vote.choice, contr: contr): unit =>
+    Assert.txSuccess(vote(choice, contr));
+
+// Batch call of lock entry point, WARNING: changes Test framework source
+const batchLock = (addr_lst: list<address>, amount_: nat, contr: contr) : unit => {
+    const lock = (addr: address) : unit => {
+        Test.set_source (addr);
+        lockSuccess(amount_, contr);
+    };
+    List.iter(lock, addr_lst);
+};
+
+// Batch call of vote entry point, WARNING: changes Test framework source
+const batchVote = (addr_lst: list<address>, choice: DAO.Vote.choice, contr: contr) : unit => {
+    const vote = (addr: address) : unit => {
+        Test.set_source (addr);
+        voteSuccess(choice, contr);
+    };
+    List.iter(vote, addr_lst);
+};
+
+// Assert DAO contract at [taddr] has [owner] [amount_] of tokens locked
+const assertLocked = (taddr: taddr, owner: DAO.Storage.Vault.owner, amount_: nat) : unit => {
+    const s = Test.get_storage(taddr);
+    match (Big_map.find_opt(owner, s.vault), {
+        Some: (tokens: nat) => assert(tokens == amount_),
+        None: () => Test.failwith("Big_map key should not be missing")
+    });
+};
+
+// Assert DAO contract at [taddr] have registered [voter] [choice] with [amount_] votes
+const assertVoted = (taddr: taddr, voter: address, choice: bool, amount_: nat)
+: unit => {
+    const s = Test.get_storage (taddr);
+    const p = Option.unopt(s.proposal);
+    match (Map.find_opt(voter, p.votes), {
+        Some: (vote: DAO.Vote.t) => assert(vote[0] == choice && vote[1] == amount_),
+        None: () => Test.failwith("Map key should not be missing")
+    });
+};
+
+// Assert DAO contract at [taddr] have an outcome occuring for [n] key in Executed state
+const assertExecuted = (taddr: taddr, n: nat) : unit => {
+    const s = Test.get_storage (taddr);
+    match (Big_map.find_opt(n, s.outcomes), {
+        None: () => Test.failwith("The outcome should exists"),
+        Some: (o: Outcome.t) => {
+            const [_, state] = o;
+            assert(state == (Executed() as Outcome.state))
+        }
+    });
+};
+
+// Assert outcomes [bm] big map have an entry for key [k] and has given [s] state
+const assertProposalState =
+    (bm: DAO.Storage.outcomes, k: nat, s: DAO.Outcome.state) : unit =>
+    match(Big_map.find_opt(k, bm), {
+        Some: (outcome: DAO.Outcome.t) => {
+            const [proposal, state] = outcome;
+            // just checking timelock existence
+            const _checkTimelock = proposal.timelock;
+            // check that the proposal have been accepted
+            assert(state == s)
+        },
+        None: () => Test.failwith("outcome not found")
+    });

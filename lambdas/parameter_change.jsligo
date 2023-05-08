@@ -1,0 +1,17 @@
+#import "../src/lambda.jsligo" "Lambda"
+
+// A parameter change lambda is just a new record of type Config.t,
+// the storage will be updated with the differences when the lambda is
+// executed
+
+const lambda_ : Lambda.parameterChange = () => ({
+    depositAmount: 400 as nat,
+    refundThreshold: 32 as nat,
+    quorumThreshold: 67 as nat,
+    superMajority: 80 as nat,
+    startDelay: 86400 as nat,
+    votingPeriod: 604800 as nat,
+    timelockDelay: 86400 as nat,
+    timelockPeriod: 259200 as nat,
+    burnAddress: "tz1burnburnburnburnburnburnburjAYjjX" as address
+});

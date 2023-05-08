@@ -1,0 +1,7 @@
+#import "../src/lambda.jsligo" "Lambda"
+
+// Sample lambda code for an empty list of operations
+// Notice that a type from the Lambda module is used
+// See Makefile compile-lambda target for usage with ligo CLI
+
+const lambda_ : Lambda.operationList = () => list([]) as list<operation>;

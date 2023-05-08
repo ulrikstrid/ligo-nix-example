@@ -1,0 +1,27 @@
+#import "../src/lambda.jsligo" "Lambda"
+#import "@ligo/fa/lib/fa2/asset/single_asset.mligo" "SingleAsset"
+
+// Sample lambda that calls an FA2 transfer entrypoint
+
+const lambda_ : Lambda.operationList = () => {
+    const addr = "KT1QAShr81NcaFZyJR4srfYGuvPyD8ibbMtT" as address;
+    const transferOpt: option<contract<SingleAsset.transfer>> =
+        Tezos.get_entrypoint_opt("%transfer", addr);
+
+    match (transferOpt, {
+        None: () => failwith ("TOKEN_CONTRACT_NOT_FOUND"),
+        Some: (c: contract<SingleAsset.transfer>) => {
+            const transfer_requests: SingleAsset.transfer =
+                list([({
+                    from_: "KT1BWSmjEhEknnBWSYrrSdhH217osBbwdVos" as address,
+                    txs: list([{
+                        to_: "tz1burnburnburnburnburnburnburjAYjjX" as address,
+                        amount: 4000 as nat
+                    }]) as list<SingleAsset.atomic_trans>
+                })]);
+
+            const op = Tezos.transaction (transfer_requests, 0 as tez, c);
+            list([op]);
+        }
+    });
+};

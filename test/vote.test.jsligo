@@ -1,0 +1,66 @@
+#import "./helpers/token.jsligo" "Token_helper"
+#import "./helpers/dao.jsligo" "DAO_helper"
+#import "./helpers/log.jsligo" "Log"
+#import "./helpers/assert.jsligo" "Assert"
+#import "./bootstrap/bootstrap.jsligo" "Bootstrap"
+#import "../src/main.jsligo" "DAO"
+
+const _ = Log.describe("[Vote] test suite");
+
+// Boostrapping of the test environment
+const initTokAmount = 10 as nat;
+const bootstrap = (initDAOStorage : DAO.storage) : [
+    Token_helper.originated,
+    DAO_helper.originated,
+    address] => Bootstrap.boot(initTokAmount, initDAOStorage);
+const baseConfig = DAO_helper.baseConfig;
+const baseStorage = DAO_helper.baseStorage;
+
+// Successful vote
+const testSuccess = (() : unit => {
+    // Really short start_delay
+    const config = { ...baseConfig, startDelay: 10 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [_, dao, sender_] = bootstrap(daoStorage);
+
+    const amount_ = 3 as nat;
+    DAO_helper.lockSuccess(amount_, dao.contr);
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const choice = true;
+    DAO_helper.voteSuccess(choice, dao.contr);
+    DAO_helper.assertVoted(dao.taddr, sender_, choice, amount_);
+})();
+
+// Failing vote because no proposal
+const testFailureNoProposal = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const r = DAO_helper.vote(true, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.noProposal);
+})();
+
+// Failing vote because proposal is not in voting period
+const testFailureNotVotingPeriod = (() : unit => {
+    const [_, dao, _] = bootstrap(baseStorage);
+
+    const amount_ = 3 as nat;
+    DAO_helper.lockSuccess(amount_, dao.contr);
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const r = DAO_helper.vote(true, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.notVotingPeriod);
+})();
+
+// Failing because no locked tokens in vault
+const testFailureNoLockedTokens = (() : unit => {
+    // Really short start_delay
+    const config = { ...baseConfig, startDelay: 10 as nat };
+    const daoStorage = { ...baseStorage, config: config };
+    const [_, dao, _] = bootstrap(daoStorage);
+
+    DAO_helper.proposeSuccess(DAO_helper.dummyProposal, dao.contr);
+
+    const r = DAO_helper.vote(true, dao.contr);
+    Assert.stringFailure(r, DAO.Errors.noLockedTokens);
+})();

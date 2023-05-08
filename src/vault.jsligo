@@ -1,0 +1,23 @@
+#import "./errors.jsligo" "Errors"
+
+export type owner = address;
+export type amount_ = nat;
+export type t = big_map<owner, amount_>;
+
+const getForUser = ([vault, owner]: [t, owner]) : amount_ =>
+    match(Big_map.find_opt(owner, vault), {
+        Some: (tokens: nat) => tokens,
+        None: () => 0 as nat
+    });
+
+const getForUserExn = ([vault, owner]: [t, owner]) : amount_ => {
+    const amount_ = getForUser([vault, owner]);
+    if (amount_ == (0 as nat)) {
+        return failwith(Errors.noLockedTokens)
+    }
+
+    return amount_
+}
+
+const updateForUser = ([vault, owner, amount_]: [t, owner, nat]) : t =>
+    Big_map.update(owner, Some(amount_ as nat), vault)
