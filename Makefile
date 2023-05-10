@@ -1,8 +1,3 @@
-SHELL := /bin/bash
-
-ligo_compiler?=docker run --rm -v "$(PWD)":"$(PWD)" -w "$(PWD)" ligolang/ligo:stable
-# ^ Override this variable when you run make command by make <COMMAND> ligo_compiler=<LIGO_EXECUTABLE>
-# ^ Otherwise use default one (you'll need docker)
 protocol_opt?=
 
 project_root=--project-root .
@@ -12,10 +7,10 @@ help:
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-compile = $(ligo_compiler) compile contract $(project_root) ./src/$(1) -o ./compiled/$(2) $(3) $(protocol_opt)
+compile = ligo compile contract --library $(LIGOPATH) $(project_root) ./src/$(1) -o ./compiled/$(2) $(3) $(protocol_opt)
 # ^ compile contract to michelson or micheline
 
-test = $(ligo_compiler) run test $(project_root) ./test/$(1) $(protocol_opt)
+test = ligo run test --library $(LIGOPATH) $(project_root) ./test/$(1) $(protocol_opt)
 # ^ run given test file
 
 compile: ## compile contracts
@@ -40,15 +35,12 @@ node_modules:
 	@cd deploy && npm install
 	@echo ""
 
-install: ## install dependencies
-	@$(ligo_compiler) install
-
 compile-lambda: ## compile a lambda (F=./lambdas/empty_operation_list.mligo make compile-lambda)
 # ^ helper to compile lambda from a file, used during development of lambdas
 ifndef F
 	@echo 'please provide an init file (F=)'
 else
-	@$(ligo_compiler) compile expression $(project_root) jsligo lambda_ --init-file $(F) $(protocol_opt)
+	@ligo compile expression --library $(LIGOPATH) $(project_root) jsligo lambda_ --init-file $(F) $(protocol_opt)
 	# ^ the lambda is expected to be bound to the name 'lambda_'
 endif
 
@@ -58,9 +50,9 @@ ifndef F
 	@echo 'please provide an init file (F=)'
 else
 	@echo 'Packed:'
-	@$(ligo_compiler) run interpret $(project_root) 'Bytes.pack(lambda_)' --init-file $(F) $(protocol_opt)
+	@ligo run interpret --library $(LIGOPATH) $(project_root) 'Bytes.pack(lambda_)' --init-file $(F) $(protocol_opt)
 	@echo "Hash (sha256):"
-	@$(ligo_compiler) run interpret $(project_root) 'Crypto.sha256(Bytes.pack(lambda_))' --init-file $(F) $(protocol_opt)
+	@ligo run interpret --library $(LIGOPATH) $(project_root) 'Crypto.sha256(Bytes.pack(lambda_))' --init-file $(F) $(protocol_opt)
 endif
 
 .PHONY: test
@@ -81,7 +73,7 @@ lint: ## lint code
 	@npx eslint ./scripts --ext .ts
 
 sandbox-start: ## start sandbox
-	@./scripts/run-sandbox
+	@./deploy/run-sandbox
 
 sandbox-stop: ## stop sandbox
 	@docker stop sandbox

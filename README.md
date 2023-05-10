@@ -2,6 +2,10 @@
 
 A modular example DAO contract on Tezos written in Ligolang.
 
+## Get started
+
+Follow https://devenv.sh/getting-started/ to get your development environment setup.
+
 ## Intro
 
 This example DAO allows FA2 token holders to vote on proposals, which trigger
